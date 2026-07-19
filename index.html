@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000">
+<title>노고시모 카메라</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, "Apple SD Gothic Neo", sans-serif;
+    background: #000;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  /* ---------- 상단 바 ---------- */
+  #topBar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    font-size: 15px;
+    font-weight: 700;
+    background: #000;
+    z-index: 5;
+  }
+  #flashBtn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: #2a2a2a;
+    border: none;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  #flashBtn.on { background: #e8c547; color: #000; }
+
+  /* ---------- 카메라 영역 ---------- */
+  #camWrap {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    overflow: hidden;
+  }
+  #video {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+  }
+  #video.mirrored { transform: scaleX(-1); }
+  /* 촬영 후 저장될 영역만 밝게 보이도록 위/아래를 어둡게 덮는 오버레이 */
+  .cropShade {
+    position: absolute;
+    background: rgba(0,0,0,0.72);
+    pointer-events: none;
+  }
+  #cropBorder {
+    position: absolute;
+    border: 2px solid rgba(255,255,255,0.85);
+    pointer-events: none;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0); /* placeholder, shading done by top/bottom divs */
+  }
+  #flashFx {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+  }
+  #camStatus {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    text-align: center;
+    padding: 30px;
+    background: #000;
+    z-index: 3;
+  }
+  #camStatus.hidden { display: none; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 4px solid #444;
+    border-top-color: #8fd19e;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #camStatus p { color: #ccc; font-size: 15px; line-height: 1.6; }
+  #retryBtn {
+    display: none;
+    background: #2d5a3d;
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 14px 28px;
+    cursor: pointer;
+  }
+
+  /* ---------- 하단 바 ---------- */
+  #bottomBar {
+    padding: 14px 16px 20px;
+    background: #000;
+    z-index: 5;
+  }
+  #thumbRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow-x: auto;
+    margin-bottom: 14px;
+    min-height: 0;
+  }
+  #thumbRow img {
+    height: 46px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    border: 1px solid #333;
+  }
+  #controlRow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+  }
+  #saveAllBtn {
+    background: #333;
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 12px 16px;
+    cursor: pointer;
+    white-space: nowrap;
+    min-width: 84px;
+  }
+  #saveAllBtn:disabled { opacity: 0.35; }
+  #shutterBtn {
+    width: 74px; height: 74px;
+    border-radius: 50%;
+    background: #fff;
+    border: 4px solid #666;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  #shutterBtn:active { background: #ccc; }
+  #countSpacer { min-width: 84px; text-align: center; font-size: 14px; color: #8fd19e; font-weight: 700; }
+
+  /* ---------- 저장 안내 오버레이 ---------- */
+  #saveOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.92);
+    z-index: 20;
+    padding: 24px;
+    overflow-y: auto;
+  }
+  #saveOverlay.show { display: block; }
+  #saveOverlay .msg {
+    font-size: 16px;
+    color: #8fd19e;
+    font-weight: 700;
+    line-height: 1.6;
+    text-align: center;
+    margin-bottom: 18px;
+  }
+  #manualImgs img {
+    width: 100%;
+    border-radius: 10px;
+    margin-bottom: 12px;
+  }
+  #closeSaveBtn {
+    display: block;
+    width: 100%;
+    background: #2d5a3d;
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    font-size: 17px;
+    font-weight: 700;
+    padding: 16px;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div id="topBar">
+  <span>📷 노고시모 카메라</span>
+  <button id="flashBtn">⚡</button>
+</div>
+
+<div id="camWrap">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="shadeTop" class="cropShade"></div>
+  <div id="shadeBottom" class="cropShade"></div>
+  <div id="flashFx"></div>
+  <div id="camStatus">
+    <div class="spinner" id="camSpinner"></div>
+    <p id="camMsg">카메라를 여는 중...</p>
+    <button id="retryBtn">다시 시도</button>
+  </div>
+</div>
+
+<div id="bottomBar">
+  <div id="thumbRow"></div>
+  <div id="controlRow">
+    <button id="saveAllBtn" disabled>💾 저장</button>
+    <button id="shutterBtn"></button>
+    <div id="countSpacer"></div>
+  </div>
+</div>
+
+<div id="saveOverlay">
+  <div class="msg" id="saveMsg"></div>
+  <div id="manualImgs"></div>
+  <button id="closeSaveBtn">✅ 닫기</button>
+</div>
+
+<script>
+const MAX_BYTES = 1024 * 1024;          // 1MB
+const TARGET_W = 1600, TARGET_H = 1200; // 4:3 가로
+const $ = id => document.getElementById(id);
+const video = $('video');
+
+let stream = null, track = null, torchOn = false, torchSupported = false;
+let shots = []; // { blob, url }
+
+// ---------- 카메라 시작 ----------
+async function startCamera() {
+  $('camStatus').classList.remove('hidden');
+  $('camSpinner').style.display = 'block';
+  $('retryBtn').style.display = 'none';
+  $('camMsg').textContent = '카메라를 여는 중...';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    track = stream.getVideoTracks()[0];
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    torchSupported = !!caps.torch;
+    $('flashBtn').style.display = torchSupported ? 'flex' : 'none';
+    $('camStatus').classList.add('hidden');
+    requestAnimationFrame(updateOverlay);
+  } catch (e) {
+    $('camSpinner').style.display = 'none';
+    $('retryBtn').style.display = 'inline-block';
+    if (e.name === 'NotAllowedError') {
+      $('camMsg').textContent = '카메라 접근이 거부되었습니다.\n설정 > Safari > 카메라에서 허용해주세요.';
+    } else if (e.name === 'NotFoundError') {
+      $('camMsg').textContent = '카메라를 찾을 수 없습니다.';
+    } else {
+      $('camMsg').textContent = '카메라를 열 수 없습니다: ' + e.message;
+    }
+  }
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; track = null; }
+}
+
+$('retryBtn').onclick = startCamera;
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopCamera();
+  else if (!stream) startCamera();
+});
+
+// ---------- 실시간 4:3 크롭 가이드 오버레이 ----------
+function updateOverlay() {
+  const wrapRect = $('camWrap').getBoundingClientRect();
+  const rect = video.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    // .cropShade는 camWrap 기준 position:absolute이므로, camWrap 좌상단을
+    // 원점으로 하는 상대좌표로 변환해야 함 (viewport 좌표를 그대로 쓰면 어긋남)
+    const top = rect.top - wrapRect.top;
+    const left = rect.left - wrapRect.left;
+    const keepH = Math.min(rect.height, rect.width * 3 / 4);
+    const shadeH = (rect.height - keepH) / 2;
+    $('shadeTop').style.top = top + 'px';
+    $('shadeTop').style.left = left + 'px';
+    $('shadeTop').style.width = rect.width + 'px';
+    $('shadeTop').style.height = shadeH + 'px';
+    $('shadeBottom').style.top = (top + rect.height - shadeH) + 'px';
+    $('shadeBottom').style.left = left + 'px';
+    $('shadeBottom').style.width = rect.width + 'px';
+    $('shadeBottom').style.height = shadeH + 'px';
+  }
+  if (stream) requestAnimationFrame(updateOverlay);
+}
+window.addEventListener('resize', updateOverlay);
+
+// ---------- 플래시 ----------
+$('flashBtn').onclick = async () => {
+  if (!track || !torchSupported) return;
+  torchOn = !torchOn;
+  try {
+    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+    $('flashBtn').classList.toggle('on', torchOn);
+  } catch (e) {
+    torchOn = false;
+  }
+};
+
+// ---------- 촬영: 화면에 보이는 그대로(가운데 4:3)를 잘라 저장 ----------
+function cropFrameToBlob(source, srcW, srcH) {
+  return new Promise(async (resolve) => {
+    let cropW = srcW, cropH = srcH;
+    if (srcW / srcH > 4 / 3) cropW = Math.round(srcH * 4 / 3);
+    else cropH = Math.round(srcW * 3 / 4);
+    const sx = Math.round((srcW - cropW) / 2);
+    const sy = Math.round((srcH - cropH) / 2);
+
+    let outW = Math.min(TARGET_W, cropW);
+    let outH = Math.round(outW * 3 / 4);
+
+    while (true) {
+      const out = document.createElement('canvas');
+      out.width = outW; out.height = outH;
+      out.getContext('2d').drawImage(source, sx, sy, cropW, cropH, 0, 0, outW, outH);
+
+      for (let q = 0.85; q >= 0.5; q -= 0.07) {
+        const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', q));
+        if (blob && blob.size <= MAX_BYTES) return resolve(blob);
+      }
+      if (outW <= 800) {
+        return resolve(await new Promise(r => out.toBlob(r, 'image/jpeg', 0.5)));
+      }
+      outW = Math.round(outW * 0.8);
+      outH = Math.round(outW * 3 / 4);
+    }
+  });
+}
+
+async function takeShot() {
+  if (!video.videoWidth) return;
+  $('flashFx').style.transition = 'none';
+  $('flashFx').style.opacity = '0.85';
+  requestAnimationFrame(() => {
+    $('flashFx').style.transition = 'opacity 250ms ease';
+    $('flashFx').style.opacity = '0';
+  });
+  const blob = await cropFrameToBlob(video, video.videoWidth, video.videoHeight);
+  shots.push({ blob, url: URL.createObjectURL(blob) });
+  renderShots();
+}
+
+$('shutterBtn').onclick = takeShot;
+
+function renderShots() {
+  $('countSpacer').textContent = shots.length ? shots.length + '장' : '';
+  $('saveAllBtn').disabled = shots.length === 0;
+  $('saveAllBtn').textContent = shots.length ? '💾 저장(' + shots.length + ')' : '💾 저장';
+  const row = $('thumbRow');
+  row.innerHTML = '';
+  shots.forEach(s => {
+    const im = document.createElement('img');
+    im.src = s.url;
+    row.appendChild(im);
+  });
+  row.scrollLeft = row.scrollWidth;
+}
+
+function resetShots() {
+  shots.forEach(s => URL.revokeObjectURL(s.url));
+  shots = [];
+  renderShots();
+}
+
+function makeFiles() {
+  const ts = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const base = '노고시모_' + ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate())
+             + '_' + pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds());
+  return shots.map((s, i) =>
+    new File([s.blob], base + '_' + (i + 1) + '.jpg', { type: 'image/jpeg' }));
+}
+
+$('saveAllBtn').onclick = async () => {
+  if (!shots.length) return;
+  const files = makeFiles();
+
+  if (navigator.canShare && navigator.canShare({ files })) {
+    try {
+      await navigator.share({ files });
+      resetShots();
+    } catch (e) { /* 공유 시트를 닫은 경우: 유지 */ }
+  } else if (/iPhone|iPad/.test(navigator.userAgent)) {
+    $('saveMsg').textContent = '👇 사진을 하나씩 길게 누른 뒤 "사진에 추가"를 선택하세요. (' + shots.length + '장)';
+    const wrap = $('manualImgs');
+    wrap.innerHTML = '';
+    shots.forEach(s => {
+      const im = document.createElement('img');
+      im.src = s.url;
+      wrap.appendChild(im);
+    });
+    $('saveOverlay').classList.add('show');
+  } else {
+    files.forEach(f => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(f);
+      a.download = f.name;
+      a.click();
+    });
+    resetShots();
+  }
+};
+
+$('closeSaveBtn').onclick = () => {
+  $('saveOverlay').classList.remove('show');
+  resetShots();
+};
+
+startCamera();
+
+// 테스트용 훅 (자동 테스트에서 사용, 실제 카메라 없이 크롭/압축 로직 검증)
+window.__test_cropFrameToBlob = cropFrameToBlob;
+window.__test_shots = () => shots;
+window.__test_renderShots = renderShots;
+</script>
+</body>
+</html>
