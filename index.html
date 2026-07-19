@@ -181,6 +181,7 @@
     font-weight: 700;
     line-height: 1.6;
     text-align: center;
+    white-space: pre-line;
     margin-bottom: 18px;
   }
   #manualImgs img {
@@ -398,16 +399,38 @@ function makeFiles() {
     new File([s.blob], base + '_' + (i + 1) + '.jpg', { type: 'image/jpeg' }));
 }
 
+// 브라우저마다 다운로드된 파일이 실제로 어디 들어가는지 안내하기 위해 구분
+async function downloadAllSequential(files) {
+  for (const f of files) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(f);
+    a.download = f.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // 연속 다운로드를 짧은 간격 안에 여러 번 트리거하면 브라우저가
+    // "자동 다운로드 차단"으로 뒤쪽 파일들을 막는 경우가 있어 텀을 둠
+    await new Promise(r => setTimeout(r, 400));
+  }
+}
+
 $('saveAllBtn').onclick = async () => {
   if (!shots.length) return;
   const files = makeFiles();
+  const isIOS = /iPhone|iPad/.test(navigator.userAgent);
 
-  if (navigator.canShare && navigator.canShare({ files })) {
+  // iOS는 공유 시트에 "이미지 저장"이 기본 내장되어 있어 공유를 우선 시도.
+  // 안드로이드는 기기/설치 앱에 따라 공유 시트에 저장 옵션 자체가 없는 경우가
+  // 많아(사용자 확인됨) 공유를 거치지 않고 바로 다운로드시키는 게 더 확실함.
+  if (isIOS && navigator.canShare && navigator.canShare({ files })) {
     try {
       await navigator.share({ files });
       resetShots();
-    } catch (e) { /* 공유 시트를 닫은 경우: 유지 */ }
-  } else if (/iPhone|iPad/.test(navigator.userAgent)) {
+      return;
+    } catch (e) { /* 공유 시트를 닫은 경우: 아래로 진행하지 않고 유지 */ return; }
+  }
+
+  if (isIOS) {
     $('saveMsg').textContent = '👇 사진을 하나씩 길게 누른 뒤 "사진에 추가"를 선택하세요. (' + shots.length + '장)';
     const wrap = $('manualImgs');
     wrap.innerHTML = '';
@@ -417,15 +440,16 @@ $('saveAllBtn').onclick = async () => {
       wrap.appendChild(im);
     });
     $('saveOverlay').classList.add('show');
-  } else {
-    files.forEach(f => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(f);
-      a.download = f.name;
-      a.click();
-    });
-    resetShots();
+    return;
   }
+
+  // 안드로이드/데스크톱: 바로 다운로드. 결과는 기기의 "다운로드" 폴더에 저장되고,
+  // 대부분의 갤러리 앱에서 "다운로드" 앨범으로 표시됨.
+  await downloadAllSequential(files);
+  $('saveMsg').textContent = '✅ ' + files.length + '장이 다운로드되었습니다.\n사진 갤러리 앱에 바로 안 보이면, "파일" 앱 → Download 폴더 또는 갤러리 앱의 "다운로드" 앨범을 확인하세요.';
+  $('manualImgs').innerHTML = '';
+  $('saveOverlay').classList.add('show');
+  resetShots();
 };
 
 $('closeSaveBtn').onclick = () => {
