@@ -43,6 +43,7 @@
     cursor: pointer;
   }
   #flashBtn.on { background: #e8c547; color: #000; }
+  #diag { font-size: 11px; font-weight: 500; color: #8fd19e; }
 
   /* ---------- 카메라 영역 ---------- */
   #camWrap {
@@ -207,6 +208,7 @@
 <body>
 <div id="topBar">
   <span>📷 노고시모 카메라</span>
+  <span id="diag"></span>
   <button id="flashBtn">⚡</button>
 </div>
 
@@ -357,6 +359,28 @@ function cropFrameToBlob(source, srcW, srcH, capW) {
   });
 }
 
+// 안드로이드 크롬 등: ImageCapture로 "사진 해상도"(영상 스트림보다 훨씬 큼)
+// 한 장을 캡처. 미지원 기기(iOS 사파리 등)에서는 null을 반환해 영상 프레임으로 폴백.
+async function grabFullResBitmap() {
+  if (!track || typeof ImageCapture === 'undefined') return null;
+  try {
+    const ic = new ImageCapture(track);
+    // 가능하면 지원 최대 해상도로 촬영
+    let settings = {};
+    try {
+      const caps = await ic.getPhotoCapabilities();
+      if (caps.imageWidth && caps.imageWidth.max) settings.imageWidth = caps.imageWidth.max;
+      if (caps.imageHeight && caps.imageHeight.max) settings.imageHeight = caps.imageHeight.max;
+    } catch (e) { /* getPhotoCapabilities 미지원 - 기본 설정으로 촬영 */ }
+    const blob = await ic.takePhoto(settings);
+    // EXIF 방향을 반영해 비트맵으로 디코드 (영상 프레임과 방향 일관성 유지)
+    return await createImageBitmap(blob, { imageOrientation: 'from-image' });
+  } catch (e) {
+    return null;
+  }
+}
+
+let lastDiag = '';
 async function takeShot() {
   if (!video.videoWidth) return;
   $('flashFx').style.transition = 'none';
@@ -365,7 +389,18 @@ async function takeShot() {
     $('flashFx').style.transition = 'opacity 250ms ease';
     $('flashFx').style.opacity = '0';
   });
-  const blob = await cropFrameToBlob(video, video.videoWidth, video.videoHeight);
+
+  let source = video, sw = video.videoWidth, sh = video.videoHeight, via = '영상';
+  const bmp = await grabFullResBitmap();
+  if (bmp && bmp.width > 0) { source = bmp; sw = bmp.width; sh = bmp.height; via = '사진'; }
+
+  const blob = await cropFrameToBlob(source, sw, sh);
+  if (bmp && bmp.close) bmp.close();
+
+  // 진단용: 캡처 방식·원본 해상도·저장 용량 표시 (문제 파악 후 제거 예정)
+  lastDiag = via + ' ' + sw + '×' + sh + ' → ' + Math.round(blob.size / 1024) + 'KB';
+  $('diag').textContent = lastDiag;
+
   shots.push({ blob, url: URL.createObjectURL(blob) });
   renderShots();
 }
