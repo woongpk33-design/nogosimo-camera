@@ -263,6 +263,19 @@ async function startCamera() {
     await video.play();
     track = stream.getVideoTracks()[0];
     const caps = track.getCapabilities ? track.getCapabilities() : {};
+
+    // iOS 사파리는 ImageCapture가 없어 '영상 프레임'으로 저장하는데, 기본 영상
+    // 스트림 해상도가 낮게 잡힘. 트랙이 지원하는 최대 해상도로 승격시켜 화질을
+    // 끌어올림 (최신 아이폰은 4K 영상까지 지원). 실패해도 기존 스트림 유지.
+    try {
+      if (caps.width && caps.width.max && caps.height && caps.height.max) {
+        await track.applyConstraints({
+          width: { ideal: caps.width.max },
+          height: { ideal: caps.height.max }
+        });
+      }
+    } catch (e) { /* 승격 실패 - 기본 해상도 유지 */ }
+
     torchSupported = !!caps.torch;
     $('flashBtn').style.display = torchSupported ? 'flex' : 'none';
     $('camStatus').classList.add('hidden');
