@@ -238,8 +238,9 @@
 </div>
 
 <script>
-const MAX_BYTES = 1024 * 1024;          // 1MB
-const TARGET_W = 1600, TARGET_H = 1200; // 4:3 가로
+const MAX_BYTES = 1024 * 1024;          // 절대 상한 1MB
+const TARGET_MIN_BYTES = 600 * 1024;    // 목표 용량대 하한(약 600~800KB를 노림)
+const TARGET_W = 1920, TARGET_H = 1440; // 4:3 가로 (카메라 요청 해상도와 동일)
 const $ = id => document.getElementById(id);
 const video = $('video');
 
@@ -342,14 +343,24 @@ function cropFrameToBlob(source, srcW, srcH) {
       out.width = outW; out.height = outH;
       out.getContext('2d').drawImage(source, sx, sy, cropW, cropH, 0, 0, outW, outH);
 
-      for (let q = 0.85; q >= 0.5; q -= 0.07) {
+      // 화질을 0.95에서부터 낮춰가며, 1MB를 넘지 않으면서 600~800KB대에
+      // 가장 가깝게 걸리는 화질을 찾음 (이전엔 1MB 이하이기만 하면 바로
+      // 통과시켜서, 압축이 잘 되는 사진은 화질 0.85에서 이미 200KB 밑으로
+      // 떨어져버렸음)
+      let prevCandidate = null;
+      for (let q = 0.95; q >= 0.4; q -= 0.03) {
         const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', q));
-        if (blob && blob.size <= MAX_BYTES) return resolve(blob);
+        if (!blob || blob.size > MAX_BYTES) continue;
+        if (blob.size < TARGET_MIN_BYTES) {
+          return resolve(prevCandidate || blob);
+        }
+        prevCandidate = blob;
       }
+      if (prevCandidate) return resolve(prevCandidate);
       if (outW <= 800) {
-        return resolve(await new Promise(r => out.toBlob(r, 'image/jpeg', 0.5)));
+        return resolve(await new Promise(r => out.toBlob(r, 'image/jpeg', 0.4)));
       }
-      outW = Math.round(outW * 0.8);
+      outW = Math.round(outW * 0.85);
       outH = Math.round(outW * 3 / 4);
     }
   });
